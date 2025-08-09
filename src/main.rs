@@ -5,6 +5,12 @@ use std::io;
 const DEFAULT_NUMERIC_VALUE:f32 = 0.0;
 const LEAF_ERROR_RESULT:(i32,i32)=(-1,-1);
 const DEFAULT_OPER_ENUM:char = ' ';
+const NUMBER_PRIORITY:i8=0;
+
+    const PAREN_INCREASE:i8 = 5;
+    const AS_INCREASE:i8 = 1;
+    const MD_INCREASE:i8 = 2;
+    const POW_INCREASE:i8 = 3;
 
 
 #[derive(PartialEq, Eq, Debug,Clone)]
@@ -21,11 +27,12 @@ fn main() {
     io::stdin().read_line(&mut input).expect("Failed to read line");
     
     let mut v_tokens: Vec<Token> = Vec::new();
+    let v_tokens_orig: Vec<Token> = string_to_tokens(String::from(input.trim_end()));
     let mut v_i_number:Vec<f32>=Vec::new();
     
     // create tokens from input
-    v_tokens= string_to_tokens(String::from(input.trim_end()));
-    print_tokens(&v_tokens);
+    v_tokens= v_tokens_orig.clone();
+    print_tokens_ltr(&v_tokens);
     // validate number of parentheses
 
     let paren_types_eq = open_close_parens_match(&v_tokens);
@@ -36,8 +43,8 @@ fn main() {
         std::process::exit(1);
     }
 
-    // evaluate until no more operators, leaf nodes first
-    print_tokens(&v_tokens);
+    // evaluate until no more parentheses operators, leaf nodes first
+    print_tokens_ltr(&v_tokens);
     let mut all_parens_resolved: bool = false;
     loop {
         let node_bounds= find_leaf_node_expression_bounds(&v_tokens);
@@ -60,12 +67,20 @@ fn main() {
             println!("vo len {}",vo_slice_tokens.len());
             let output_tokens=evaluate_leaf_expression(&vo_slice_tokens);
             match output_tokens{
-                Ok(value)=> v_tokens = value,
+                Ok(value)=> {
+                    for iter in start..end-1{
+                        v_tokens.remove(iter);
+                    }
+                    v_tokens.insert(start, value.get(0).unwrap().clone());
+
+                },
                 Err(err)=>println!("{}",err),
             }
 
         }
     }
+    println!("eval stage 1 done ");
+    print_tokens_ltr(&v_tokens);
 
     // evaluate final expression
     let mut expression_has_operators: bool = true;
@@ -80,12 +95,15 @@ fn main() {
         let v_tokens_opt:Result<Vec<Token>,String> = evaluate_leaf_expression(&v_tokens);
         match v_tokens_opt{
             Ok(value)=>{
+                println!("reassign v_tokens");
                 v_tokens=value;
             },
             Err(err)=>{
                 println!("{}",err);
             }
         }
+        println!("stage 2 pass");
+        print_tokens_ltr(&v_tokens);
 
     }
 
@@ -107,6 +125,7 @@ struct Token{
     token_kind:TokenKind,
     o_value:char,
     n_value:f32,
+    priority:i8
 }
 
 impl Token{
@@ -138,6 +157,23 @@ fn print_tokens(tokens:&Vec<Token>){
         println!("Pos: {} value: {}",position,value);
         position+=1;
     }
+
+}
+
+fn print_tokens_ltr(tokens:&Vec<Token>){
+    println!("Tokens amount: {}",tokens.len());
+    let mut iterator= tokens.iter();
+    let mut position = 0;
+    print!("[");
+    while let Some(token) = iterator.next(){
+        let value = &token.to_string();
+        if position!=0 {
+            print!(",");
+        }
+        print!("{}",value);
+        position+=1;
+    }
+    println!("]");
 
 }
 
@@ -196,6 +232,8 @@ fn perform_binary_operation(tokens:Vec<Token>)->Result<Token,String>{
         let middle_token_char=str_to_char(tokens.get(1).unwrap().to_string().clone());
         let number_l=tokens.get(0).unwrap().n_value;
         let number_r=tokens.get(2).unwrap().n_value;
+       // let number_l=tokens.get(0).unwrap().n_value;
+        println!("Eval PBO {} {} {}",number_l,middle_token_char,number_r);
         if is_math_operator(middle_token_char){
             match middle_token_char{
                 '+'=> {num_result=number_l+number_r},
@@ -219,7 +257,44 @@ fn perform_binary_operation(tokens:Vec<Token>)->Result<Token,String>{
     
 }
 
+fn assign_priority_to_tokens(tokens : &Vec<Token>)->Vec<Token>{
+    /*
+    Assigns priorities to operators.
+    Is higher if in deeper nested level parentheses.
+    returns new vector of prioritized tokens
+     */
+    let mut new_tokens:Vec<Token> = Vec::new();
 
+    let mut paren_increase_cumulative = 0;
+    for index in 0..tokens.len(){
+        let mut token = tokens.get(index).unwrap() ;
+        let mut new_token = token.clone();
+        let my_char = token.o_value;
+        let mut priority = 0;
+        match my_char{
+            ')'=>{paren_increase_cumulative-=PAREN_INCREASE;
+                priority = PAREN_INCREASE;
+            },
+            '('=>{paren_increase_cumulative+=PAREN_INCREASE;
+                priority = PAREN_INCREASE;
+            },
+            '*'|'/'=>{priority= paren_increase_cumulative +MD_INCREASE; 
+            },
+            '+'|'-'=>{priority= paren_increase_cumulative +AS_INCREASE; 
+            },
+            '^'=>{priority= paren_increase_cumulative +POW_INCREASE; 
+            },
+            _=>{ priority = 0}
+            
+
+        }
+        new_token.priority = priority;
+        new_tokens.push(new_token);
+
+    }
+    return new_tokens
+
+}
 
 fn evaluate_leaf_expression(tokens:&Vec<Token>)->Result<Vec<Token>,String>{
     /*
@@ -240,6 +315,8 @@ fn evaluate_leaf_expression(tokens:&Vec<Token>)->Result<Vec<Token>,String>{
         Err( format!("error: leaf exp invalid start/end values len {}",tokens.len()))
     } else{
         loop{
+            println!("ELE TT len {}",tokens_temp.len());
+            print_tokens_ltr(&tokens_temp);
             if tokens_temp.len()==1 {
                 // leaf expression is complete
                 let ret_token:Token = tokens_temp.get(0).unwrap().clone();
@@ -249,15 +326,16 @@ fn evaluate_leaf_expression(tokens:&Vec<Token>)->Result<Vec<Token>,String>{
             }
             let highest_oper_index: i32 = expression_find_highest_order_operator(&tokens);
             if highest_oper_index==0 ||highest_oper_index==tokens.len()as i32-1 {
+                println!("exit early");
                 return Err(String::from("error: op can't be at start or end of expression"));
             }else{
                 let triplet_index_0 = highest_oper_index-1;
                 let triplet_index_2 = highest_oper_index+1;
                 let mut tokens_triplet:Vec<Token>=Vec::new();
                 // make triplet: number, oper, number
-                tokens_triplet.push(tokens.get(triplet_index_0 as usize).unwrap().clone());
-                tokens_triplet.push(tokens.get(highest_oper_index as usize).unwrap().clone());
-                tokens_triplet.push(tokens.get(triplet_index_2 as usize).unwrap().clone());
+                tokens_triplet.push(tokens_temp.get(triplet_index_0 as usize).unwrap().clone());
+                tokens_triplet.push(tokens_temp.get(highest_oper_index as usize).unwrap().clone());
+                tokens_triplet.push(tokens_temp.get(triplet_index_2 as usize).unwrap().clone());
                 let mut new_token:Token ;
                 let result = perform_binary_operation(tokens_triplet);
                 match result{
@@ -272,10 +350,19 @@ fn evaluate_leaf_expression(tokens:&Vec<Token>)->Result<Vec<Token>,String>{
                 let vo_slice_tokens = v_slice_tokens.to_owned();
                 let old_tokens_length = tokens_temp.len();
                 let change_index = triplet_index_0 as usize;
+                
+                println!("ELE tokens curr len {} ",tokens_temp.len());
+                println!("change index {} ",change_index);
                 tokens_temp.remove(change_index);
                 tokens_temp.remove(change_index);
                 tokens_temp.remove(change_index);
                 tokens_temp.insert(change_index,new_token);
+
+                
+                println!("ELE tokens end len {} ",tokens_temp.len());
+                if 1== tokens_temp.len(){
+                    return Ok(tokens_temp)
+                }
 
             }
 
@@ -515,6 +602,7 @@ fn make_operator_token(my_string:String)->Token{
                     token_kind:TokenKind::Operator,
                     n_value:DEFAULT_NUMERIC_VALUE,
                     o_value:oper_char,
+                    priority:0, //to be changed later
                 };
                 return token
 }
@@ -532,6 +620,7 @@ fn make_number_token(my_string:&String)->Token{
                     token_kind:TokenKind::Data,
                     n_value:num_val,
                     o_value:DEFAULT_OPER_ENUM,
+                    priority:NUMBER_PRIORITY
                 };
                 return token
 }
@@ -599,6 +688,7 @@ fn float_to_token(my_float:f32)->Token{
         token_kind:TokenKind::Data,
         n_value:my_float,
         o_value:DEFAULT_OPER_ENUM,
+        priority:NUMBER_PRIORITY
     };
     return token
 }
