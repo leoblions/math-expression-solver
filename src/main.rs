@@ -1,6 +1,8 @@
 #![allow(dead_code, unused_variables, unused_assignments, unused_mut)]
 use std::io;
 
+const START_VERBOSE: bool = false;
+
 const DEFAULT_NUMERIC_VALUE: f32 = 0.0;
 const LEAF_ERROR_RESULT: (i32, i32) = (-1, -1);
 const DEFAULT_OPER_ENUM: char = ' ';
@@ -20,52 +22,66 @@ enum TokenKind {
 fn main() {
     // type in text calculator
 
-    println!("Enter a math expression:\n");
-    let mut input = String::new();
-    io::stdin()
-        .read_line(&mut input)
-        .expect("Failed to read line");
+    let verbose = START_VERBOSE;
 
-    let mut v_tokens: Vec<Token> = Vec::new();
-    let v_tokens_orig: Vec<Token> = string_to_tokens(String::from(input.trim_end()));
-    let mut v_i_number: Vec<f32> = Vec::new();
-
-    // create tokens from input
-    v_tokens = v_tokens_orig.clone();
-    v_tokens = assign_priority_to_tokens(&v_tokens);
-    v_tokens = remove_paren_tokens(&v_tokens);
-    print_tokens_ltr(&v_tokens);
-
-    // evaluate until no more operators
-    print!("Start tokens after parens removed ");
-    print_tokens_ltr(&v_tokens);
+    println!("Enter a math expression.");
+    println!("q = quit\n");
 
     loop {
-        let expression_has_operators = check_expression_has_operators(&v_tokens);
-        let highest_priority_index = find_highest_priority_operator_token_index(&v_tokens);
-        let node_bounds = find_leaf_node_expression_bounds(&v_tokens);
-        if v_tokens.len() == 1 || !expression_has_operators {
-            // reduced to 1 token
-            print!("Final token ");
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read line");
+
+        let mut v_tokens: Vec<Token> = Vec::new();
+        let v_tokens_orig: Vec<Token> = string_to_tokens(String::from(input.trim_end()));
+        let mut v_i_number: Vec<f32> = Vec::new();
+
+        // if v_tokens.len() == 0 {
+        //     break;
+        // }
+
+        // create tokens from input
+        v_tokens = v_tokens_orig.clone();
+        v_tokens = assign_priority_to_tokens(&v_tokens);
+        v_tokens = remove_paren_tokens(&v_tokens);
+        v_tokens = make_negative_tokens(&v_tokens);
+
+        if verbose {
+            print!("after mnt");
             print_tokens_ltr(&v_tokens);
-            break;
-        } else {
-            let vo_tokens = evaluate_triplet_expression(&v_tokens, highest_priority_index - 1);
-            if let Ok(value) = vo_tokens {
-                v_tokens = value;
+        }
+
+        // evaluate until no more operators
+
+        loop {
+            let expression_has_operators = check_expression_has_operators(&v_tokens);
+            let highest_priority_index = find_highest_priority_operator_token_index(&v_tokens);
+            //let node_bounds = find_leaf_node_expression_bounds(&v_tokens);
+            if v_tokens.len() == 1 || !expression_has_operators {
+                // reduced to 1 token
+                if verbose {
+                    print_tokens_ltr(&v_tokens);
+                }
+
+                break;
             } else {
-                println!("ERROR 03 main");
+                let vo_tokens = evaluate_triplet_expression(&v_tokens, highest_priority_index - 1);
+                if let Ok(value) = vo_tokens {
+                    v_tokens = value;
+                } else {
+                    println!("ERROR 03 main");
+                }
             }
         }
-    }
-    println!("eval stage 1 done ");
-    print_tokens_ltr(&v_tokens);
+        //print_tokens_ltr(&v_tokens);
 
-    match v_tokens.get(0) {
-        Some(value) => {
-            println!("Final result: {}", value.n_value)
+        match v_tokens.get(0) {
+            Some(value) => {
+                println!("Final result: {}", value.n_value)
+            }
+            None => println!("Failed to calculate final result."),
         }
-        None => println!("Failed to calculate final result."),
     }
 }
 
@@ -83,6 +99,9 @@ impl Token {
     pub fn is_number(&self) -> bool {
         return self.token_kind == TokenKind::Data;
     }
+    pub fn is_operator(&self) -> bool {
+        return self.token_kind == TokenKind::Operator;
+    }
     pub fn to_string(&self) -> String {
         if self.token_kind == TokenKind::Data {
             return self.n_value.to_string();
@@ -97,12 +116,17 @@ impl Token {
 }
 
 fn print_tokens(tokens: &Vec<Token>) {
-    println!("Tokens amount: {}", tokens.len());
+    if START_VERBOSE {
+        println!("Tokens amount: {}", tokens.len());
+    }
     let mut iterator = tokens.iter();
     let mut position = 0;
     while let Some(token) = iterator.next() {
         let value = &token.to_string();
-        println!("Pos: {} value: {}", position, value);
+        if START_VERBOSE {
+            println!("Pos: {} value: {}", position, value);
+        }
+
         position += 1;
     }
 }
@@ -172,7 +196,10 @@ fn perform_binary_operation(tokens: Vec<Token>) -> Result<Token, String> {
         let number_l = tokens.get(0).unwrap().n_value;
         let number_r = tokens.get(2).unwrap().n_value;
         // let number_l=tokens.get(0).unwrap().n_value;
-        println!("Eval PBO {} {} {}", number_l, middle_token_char, number_r);
+        if START_VERBOSE {
+            println!("Eval PBO {} {} {}", number_l, middle_token_char, number_r);
+        }
+
         if is_math_operator(middle_token_char) {
             match middle_token_char {
                 '+' => num_result = number_l + number_r,
@@ -188,6 +215,114 @@ fn perform_binary_operation(tokens: Vec<Token>) -> Result<Token, String> {
             Err(String::from("error: operator is invalid"))
         }
     }
+}
+
+fn make_negative_tokens(tokens: &Vec<Token>) -> Vec<Token> {
+    let mut new_tokens: Vec<Token> = Vec::new();
+    for value in tokens.iter() {
+        new_tokens.push(value.clone());
+    }
+
+    for index in 0..tokens.len() {
+        let mut token = tokens.get(index).unwrap();
+        let mut new_token = token.clone();
+        let my_char = token.o_value;
+        let is_oper = is_math_operator(my_char);
+        let mut is_neg = false;
+
+        if is_oper && my_char == '-' && index < tokens.len() - 1 {
+            if index == 0 {
+                let fw1_is_number = new_tokens.get(index + 1).unwrap().is_number();
+                // if leftmost token is minus
+                if fw1_is_number && tokens.len() > 1 {
+                    let mut token = tokens.get(index + 1).unwrap();
+                    let mut new_token = token.clone();
+                    let new_value = token.n_value * -1.0;
+                    new_token.n_value = new_value;
+
+                    new_tokens.remove(index + 1);
+                    new_tokens.insert(index + 1, new_token);
+
+                    let mut token = tokens.get(index).unwrap();
+                    let mut new_token = token.clone();
+                    new_token.o_value = DEFAULT_OPER_ENUM;
+                    new_tokens.remove(index);
+                    new_tokens.insert(index, new_token);
+                }
+            } else if index > 0 {
+                let fw1_is_number = new_tokens.get(index + 1).unwrap().is_number();
+                let bw1_is_oper = new_tokens.get(index - 1).unwrap().is_operator();
+                let bw1_char = new_tokens.get(index - 1).unwrap().o_value;
+                if fw1_is_number && bw1_is_oper {
+                    if bw1_char != '(' && bw1_char != ')' {
+                        let mut token = tokens.get(index + 1).unwrap();
+                        let mut new_token = token.clone();
+                        let new_value = token.n_value * -1.0;
+                        new_token.n_value = new_value;
+
+                        new_tokens.remove(index + 1);
+                        new_tokens.insert(index + 1, new_token);
+
+                        let mut token = tokens.get(index).unwrap();
+                        let mut new_token = token.clone();
+                        new_token.o_value = DEFAULT_OPER_ENUM;
+                        new_tokens.remove(index);
+                        new_tokens.insert(index, new_token);
+                    }
+                }
+            }
+        }
+    }
+    let mut new_tokens_f: Vec<Token> = Vec::new();
+    for value in new_tokens.iter() {
+        if !value.is_operator() || value.o_value != DEFAULT_OPER_ENUM {
+            new_tokens_f.push(value.clone());
+        }
+    }
+
+    return new_tokens_f;
+}
+
+fn make_negative_tokens_0(tokens: &Vec<Token>) -> Vec<Token> {
+    let mut new_tokens: Vec<Token> = Vec::new();
+
+    for index in 0..tokens.len() {
+        let mut token = tokens.get(index).unwrap();
+        let mut new_token = token.clone();
+        let my_char = token.o_value;
+        let is_oper = is_math_operator(my_char);
+        let mut is_neg = false;
+
+        // first token can't be negative, second can
+        if index > 1 {
+            // m1 is minus, and m2 is operator
+            let m1_is_oper = new_tokens.last().unwrap().is_operator();
+            let m1_char = new_tokens.last().unwrap().o_value;
+            let m2_is_oper = new_tokens.last().unwrap().is_operator();
+            if m1_char == '-' && m2_is_oper && is_oper {
+                is_neg = true;
+            } else {
+                is_neg = false;
+            };
+        } else if index > 0 {
+            // m1 is minus
+            let m1_char = new_tokens.last().unwrap().o_value;
+            if m1_char == '-' && is_oper {
+                is_neg = true;
+            } else {
+                is_neg = false;
+            };
+        }
+
+        if !is_oper && is_neg {
+            new_token.n_value = new_token.n_value * -1.0;
+            new_tokens.pop();
+            new_tokens.push(new_token);
+        } else {
+            new_tokens.push(new_token);
+        }
+    }
+    return new_tokens;
 }
 
 fn assign_priority_to_tokens(tokens: &Vec<Token>) -> Vec<Token> {
@@ -272,8 +407,10 @@ fn evaluate_triplet_expression(
      */
     let mut tokens_temp: Vec<Token> = Vec::new();
     tokens_temp = tokens.clone();
+    if START_VERBOSE {
+        println!("ETE tokens_temp length {}", tokens_temp.len());
+    }
 
-    println!("ETE tokens_temp length {}", tokens_temp.len());
     let mut output_tokens: Vec<Token> = Vec::new();
 
     let token_start = tokens.first().unwrap().is_number();
@@ -299,15 +436,19 @@ fn evaluate_triplet_expression(
     // let vo_slice_tokens = v_slice_tokens.to_owned();
     // let old_tokens_length = tokens_temp.len();
     let change_index = triplet_start as usize;
+    if START_VERBOSE {
+        println!("ELE tokens curr len {} ", tokens_temp.len());
+        println!("change index {} ", change_index);
+    }
 
-    println!("ELE tokens curr len {} ", tokens_temp.len());
-    println!("change index {} ", change_index);
     tokens_temp.remove(change_index);
     tokens_temp.remove(change_index);
     tokens_temp.remove(change_index);
     tokens_temp.insert(change_index, new_token);
+    if START_VERBOSE {
+        println!("ELE tokens end len {} ", tokens_temp.len());
+    }
 
-    println!("ELE tokens end len {} ", tokens_temp.len());
     return Ok(tokens_temp);
 }
 
@@ -320,7 +461,10 @@ fn evaluate_leaf_expression(tokens: &Vec<Token>) -> Result<Vec<Token>, String> {
      */
     let mut tokens_temp: Vec<Token> = Vec::new();
     tokens_temp = tokens.clone();
-    println!("tokens_temp length {}", tokens_temp.len());
+    if START_VERBOSE {
+        println!("tokens_temp length {}", tokens_temp.len());
+    }
+
     let mut output_tokens: Vec<Token> = Vec::new();
     let token_start = tokens.first().unwrap().is_number();
     let token_end = tokens.last().unwrap().is_number();
@@ -640,7 +784,9 @@ fn string_to_tokens(my_string: String) -> Vec<Token> {
             break;
         }
         current_char = my_string.chars().nth(current_index).unwrap();
-        println!("current char {}", current_char);
+        if START_VERBOSE {
+            println!("current char {}", current_char);
+        }
 
         if is_operator(current_char) {
             if string_tmp.len() > 0 {
@@ -662,6 +808,8 @@ fn string_to_tokens(my_string: String) -> Vec<Token> {
                 let new_token = make_number_token(&string_tmp);
                 v_tokens.push(new_token);
             }
+        } else if current_char == 'q' {
+            std::process::exit(0);
         } else {
             println!("Invalid char {} ", current_char);
             current_index += 1;
