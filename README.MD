@@ -6,7 +6,7 @@
 - Supports negative numbers and decimals
 - add, subtract, multiply, divide, power, parentheses
 
-###Example:
+### Example:
 > (9*9)-2
 
 I made this as a programming exercise to try out features of rust :)
